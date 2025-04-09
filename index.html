@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ILWebChat</title>
+    <style>
+body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    background-color: #303030; 
+    color: #fff;
+}
+.chat-container {
+    display: flex;
+    width: 100%;
+}
+.sidebar {
+    width: 20%;
+    background-color: #737373;
+    color: #fff;
+    padding: 1rem;
+    overflow-y: auto;
+    box-sizing: border-box; 
+}
+#createChannelButton {
+    margin-bottom: 1rem;
+}
+#userList {
+    background: transparent;
+    color: #fff;
+    padding: 1rem;
+    width: 100%; 
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+#userList div {
+    position: relative;
+    cursor: pointer;
+    background-color: transparent;
+}
+#userList div::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 100%;
+    background-color: #ffd700;
+    transition: width 0.3s ease;
+    z-index: -1;
+}
+#userList div:hover::before {
+    width: 100%;
+}
+#userList div:hover {
+    color: blue;
+}
+#channelContainer {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    box-sizing: border-box;
+}
+#channelList {
+    background: transparent;
+    color: #fff;
+    padding: 1rem;
+    width: 100%;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+#channelList div {
+    cursor: pointer;
+    transition: color 0.3s ease;
+    background-color: transparent;
+}
+#channelList div:hover {
+    color: blue;
+}
+#main-content {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+}
+#messages {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    max-height: 80vh;
+}
+#messages > li {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    margin-bottom: 0.5rem;
+    border-radius: 5px;
+}
+#messages > li:nth-child(odd) {
+    background: transparent;
+}
+#form-container {
+    background: #737373;
+    padding: 0.25rem;
+    box-sizing: border-box;
+    backdrop-filter: blur(10px);
+    margin-top: auto;
+    width: 100%;
+}
+#form {
+    display: flex;
+    align-items: center;
+}
+#input {
+    border: none;
+    padding: 0.25rem 1rem; 
+    flex-grow: 1;
+    border-radius: 2rem;
+    margin: 0.25rem;
+    width: calc(100% - 2rem);
+    outline: none;
+}
+#form > button {
+    background: #333;
+    border: none;
+    padding: 0.25rem 1rem; 
+    margin: 0.25rem;
+    border-radius: 3px;
+    color: #fff;
+    outline: none;
+}
+.avatar-img {
+            width: 50px;
+            height: 50px;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="sidebar">
+            <button id="createChannelButton">Create Channel</button>
+            <h2>Channels list :</h2>
+            <div id="channelContainer"><div id="channelList"></div></div>
+            <h2>Users list :</h2>
+            <div id="userList"></div>
+        </div>
+        <div id="main-content">
+            <div id="chatContainer">
+                <div id="typingStatus"></div>
+                <ul id="messages"></ul>
+            </div>
+            <div id="form-container">
+                <form action="" id="form">
+                    <input autocomplete="off" id="input" /><button type="submit">Send</button>
+                </form>
+            </div>
+        </div>
+    </div>  
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    var socket = io();
+    var messages = document.getElementById('messages');
+    var form = document.getElementById('form');
+    var input = document.getElementById('input');
+    var userList = document.getElementById('userList');
+    var channels = ['Public group'];
+    var users = [];
+    var isTyping = false;
+    var typingTimeout;
+    let username = '';
+    let channelName = '';
+    let isMessagingVisible = false;
+    let currentChannel = 'Public group';
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Code pour mettre à jour la liste des channels lors du chargement de la page
+        socket.emit('get channels');
+      });
+
+    // Afficher la boîte de dialogue d'avatar au chargement de la page
+    showAvatarSelectionDialog();
+
+    // Fonction pour sélectionner un avatar pré-défini
+    function selectAvatar(avatarUrl) {
+        username = prompt("Enter your username:");
+        if (username) {
+            closeAvatarSelectionDialog();
+            avatarUrl = avatarUrl;
+            socket.emit('new user', { username, avatarUrl: avatarUrl });
+        }
+    }
+    // Fonction pour masquer la boîte de dialogue des avatars
+    function closeAvatarSelectionDialog() {
+        const avatarDialog = document.querySelector('#avatarSelectionDialog');
+        if (avatarDialog) {
+            document.body.removeChild(avatarDialog);
+        }
+    }
+
+    /**
+     *   Est censé gérer le click sur le bouton de création de channel
+     */
+    document.getElementById('createChannelButton').addEventListener('click', handleCreateChannel);
+    function handleCreateChannel() {
+    channelName = prompt("Enter the name for the new channel:");
+    console.log("channelName:", channelName);
+    if (channelName) {
+        console.log("channel is creating...");
+        socket.emit('create channel', channelName);
+        console.log("channel is created");
+    }
+    }
+
+    /**
+     *   Gére le bouton "Send" du message
+     */
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (input.value) {
+            socket.emit('chat message', input.value);
+            input.value = '';
+        }
+    });
+
+    socket.on('channel update', function(updatedChannels) {
+        updateChannelList(updatedChannels);
+      });
+
+    input.addEventListener('input', function() {
+        // Annuler le délai précédent s'il existe
+        clearTimeout(typingTimeout);
+        // Émettre un événement "typing" uniquement s!i l'utilisateur n'était pas déjà en train de saisir
+        if (!isTyping) {
+            socket.emit('typing', true);
+            isTyping = true;
+        }
+        // Définir un nouveau délai pour réinitialiser la variable isTyping après un certain délai (par exemple, 1000 ms)
+        typingTimeout = setTimeout(function() {
+            isTyping = false;
+            socket.emit('typing', false);
+        }, 1000);
+    });
+
+    // Gérer l'événement "user is typing"
+    socket.on('user typing', function(typingUsers) {
+        var typingStatus = document.getElementById('typingStatus');
+        var typingUsersString = typingUsers.join(', ');
+        if (typingUsersString !== '') {
+            typingStatus.textContent = `${typingUsersString} ${typingUsers.length > 1 ? 'are' : 'is'} typing...`;
+
+            // Cacher le message "is typing" pour l'utilisateur actuel
+            if (typingUsers.includes(username)) {
+                typingStatus.style.display = 'none';
+            } else {
+                typingStatus.style.display = 'block';
+            }
+        } else {
+            typingStatus.textContent = '';
+            typingStatus.style.display = 'none';
+        }
+    });
+
+    /**
+     *   Gére l'envoi des messages
+     */
+    socket.on('chat message', function(data) {
+        console.log(`Received message '${data.message}'`);
+        var item = document.createElement('li');
+        var avatarHTML = data.avatar ? `<img src="${data.avatar}" alt="Avatar" style="width: 20px; height: 20px; margin-right: 5px;">` : '';
+        item.innerHTML = `${avatarHTML}${data.username}: ${data.message}`;
+        messages.appendChild(item);
+        window.scrollTo(0, document.body.scrollHeight);
+    });
+
+    /**
+     *   Gérer la connexion des users
+     */
+    socket.on('user connected', function(data) {
+        var item = document.createElement('li');
+        item.innerHTML = `<img src="${data.avatar}" alt="Avatar" style="width: 20px; height: 20px; margin-right: 5px;"> ${data.username} connected`;
+        messages.appendChild(item);
+        updateUserList();
+    });
+
+    /**
+     *   Gérer la déconnexion des users
+     */
+    socket.on('user disconnected', function(data) {
+        var item = document.createElement('li');
+        item.innerHTML = `<img src="${data.avatarUrl}" alt="Avatar" style="width: 20px; height: 20px; margin-right: 5px;"> ${data.username} disconnected`;        messages.appendChild(item);
+        messages.appendChild(item);
+        updateUserList();
+    });
+
+    /**
+    *   Gérer la liste des users
+    */
+    socket.on('online users', function(updatedUsers) {
+        users = updatedUsers;
+        updateUserList();
+    });
+
+    // Mise à jour de la liste des utilisateurs
+    function updateUserList() {
+        var userList = document.getElementById('userList');
+        userList.innerHTML = '';
+        var onlineUsersText = document.createElement('div');
+        onlineUsersText.textContent = '';
+        onlineUsersText.classList.add('online-users-text');
+        userList.appendChild(onlineUsersText);
+        users.forEach(function (user) {
+            var userItem = document.createElement('div');
+            var avatarHTML = user.avatar ? `<img src="${user.avatar}" alt="Avatar" style="width: 20px; height: 20px; margin-right: 5px;">` : '';
+            userItem.innerHTML = `${avatarHTML}${user.username}`;
+            userList.appendChild(userItem);
+        });
+    }
+    // Gérer les messages privés
+    socket.on('private message', function(data) {
+        var item = document.createElement('li');
+        var avatarHTML = data.sender.avatar ? `<img src="${data.sender.avatar}" alt="Avatar" style="width: 20px; height: 20px; margin-right: 5px;">` : '';
+        item.innerHTML = `${avatarHTML}(Private) ${data.sender.username}: ${data.message}`;
+        messages.appendChild(item);
+        window.scrollTo(0, document.body.scrollHeight);
+    });
+
+    /**
+     *   Censé adapter l'affichage des messages selon le channel sélectionné
+     */
+    socket.on('channel message', function({ channel, message }) {
+        if (!channels[channel]) {
+            channels[channel] = [];
+        }
+
+        channels[channel].push(message);
+
+        if (channel === currentChannel) {
+        messages.innerHTML = '';
+        channels[channel].forEach(function (data) {
+            var item = document.createElement('li');
+            var avatarHTML = data.avatar ? `<img src="${data.avatar}" alt="Avatar" style="width: 20px; height: 20px; margin-right: 5px;">` : '';
+            item.innerHTML = `${avatarHTML}${data.username}: ${data.message}`;
+            messages.appendChild(item);
+        });
+        window.scrollTo(0, document.body.scrollHeight);
+    }
+    });
+
+    // Fonction pour mettre à jour la liste des channels
+    function updateChannelList(channels) {
+        var channelList = document.getElementById('channelList');
+        channelList.innerHTML = '';
+
+        channels.forEach(function (channel) {
+          var channelItem = document.createElement('div');
+          channelItem.textContent = channel;
+          channelItem.addEventListener('click', function () {
+            socket.emit('join channel', channel);
+          });
+          channelList.appendChild(channelItem);
+        });
+        socket.emit('join channel', 'Public group');
+    }
+
+    // Utiliser la délégation d'événements pour les clics sur les utilisateurs
+    userList.addEventListener('click', function(event) {
+        if (event.target.tagName === 'DIV') {
+            const recipient = event.target.textContent.trim();
+            const message = prompt(`Send a private message to ${recipient}:`);
+            if (message) {
+                socket.emit('private message', { recipient, message });
+            }
+            // Ajouter une classe pour déclencher l'animation
+            event.target.classList.add('clicked');
+            setTimeout(() => {
+                // Supprimer la classe après la fin de l'animation
+                event.target.classList.remove('clicked');
+            }, 300);
+        }
+    });
+
+    socket.on('join channel', function(channel) {
+        currentChannel = channel;
+        updateChannelList(channels);
+    });
+
+    socket.on('channel created', function(data) {
+        var item = document.createElement('li');
+        item.textContent = `${data.channelName} created`;
+        messages.appendChild(item);
+        window.scrollTo(0, document.body.scrollHeight);
+    });
+
+    // Ajouter la gestion des clics sur les channels
+    channelList.addEventListener('click', function(event) {
+        if (event.target.tagName === 'DIV') {
+            const selectedChannel = event.target.textContent.trim();
+            socket.emit('join channel', selectedChannel);
+        }
+    });
+
+    // Fonction pour créer la boîte de dialogue d'avatar
+    function showAvatarSelectionDialog() {
+        const avatarDialog = document.createElement('div');
+        avatarDialog.id = 'avatarSelectionDialog';
+        avatarDialog.innerHTML = `
+        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+            <p>Choose your avatar:</p>
+            <img class="avatar-img" src="/avatars/avatar1.jpg" alt="Avatar 1" onclick="selectAvatar('/avatars/avatar1.jpg')">
+            <img class="avatar-img" src="/avatars/avatar2.jpg" alt="Avatar 2" onclick="selectAvatar('/avatars/avatar2.jpg')">
+            <img class="avatar-img" src="/avatars/avatar3.jpg" alt="Avatar 3" onclick="selectAvatar('/avatars/avatar3.jpg')">
+            <img class="avatar-img" src="/avatars/avatar4.jpg" alt="Avatar 4" onclick="selectAvatar('/avatars/avatar4.jpg')">
+            <br><img class="avatar-img" src="/avatars/avatar5.jpg" alt="Avatar 5" onclick="selectAvatar('/avatars/avatar5.jpg')">
+            <img class="avatar-img" src="/avatars/avatar6.jpg" alt="Avatar 6" onclick="selectAvatar('/avatars/avatar6.jpg')">
+            <img class="avatar-img" src="/avatars/avatar7.jpg" alt="Avatar 7" onclick="selectAvatar('/avatars/avatar7.jpg')">
+            <img class="avatar-img" src="/avatars/avatar8.jpg" alt="Avatar 8" onclick="selectAvatar('/avatars/avatar8.jpg')">
+        </div>
+    `;
+        document.body.appendChild(avatarDialog);
+    }
+</script>
+</body>
+</html>
